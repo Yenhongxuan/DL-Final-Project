@@ -213,6 +213,12 @@ def run(
                     x1, y1, x2, y2 = xyxy[0].to(torch.int), xyxy[1].to(torch.int), xyxy[2].to(torch.int), xyxy[3].to(torch.int)
                     x, y, w, h = x1, y1, x2 - x1, y2 - y1
                     img_cropped = im0s[y:y+h, x:x+w].copy()
+                    
+                    cv2.imwrite(os.path.join('./detection', '{}.jpg'.format(i)), img_cropped)
+                    i += 1
+                    
+                    
+                    
                     img_cropped = Image.fromarray(img_cropped)
                     img_cropped = img_transform['test'](img_cropped)
                     if len(img_cropped.size()) == 3:
@@ -239,8 +245,7 @@ def run(
                     
                     
                     
-                    # cv2.imwrite(os.path.join('./detection', '{}.jpg'.format(i)), img_cropped)
-                    # i += 1
+                   
                     
                     
                     

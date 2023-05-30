@@ -5,7 +5,7 @@ import os
 from PIL import Image
 
 
-root = './data'
+root = './data2'
 classes = os.listdir(root)
 for c in classes:
     print(c)

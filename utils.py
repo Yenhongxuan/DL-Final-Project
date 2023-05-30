@@ -5,6 +5,10 @@ from torch.utils.data import Dataset
  
 from tqdm import tqdm
 
+from sklearn import metrics
+
+import matplotlib.pyplot as plt
+
 class DeviceDataLoader():
     def __init__(self, dl, device):
         self.dl = dl
@@ -82,6 +86,22 @@ def validating(valid_dl, model, util):
             batch_acc.append(util.accuracy(outputs, labels))
         return torch.stack(batch_loss).mean(), torch.stack(batch_acc).mean()    
 
+
+
+def testing(test_dl, model, util):
+    model.eval()
+    batch_pred_prob = []
+    batch_pred_label = []
+    batch_label = []
+    with torch.no_grad():
+        for batch in test_dl:
+            images, labels = batch
+            outputs = model(images)
+            pred_prob, pred_label = torch.max(outputs, dim=1)
+            batch_pred_prob.append(pred_prob.cpu())
+            batch_pred_label.append(pred_label.cpu())
+            batch_label.append(labels.cpu())
+    return torch.cat(batch_label).numpy(), torch.cat(batch_pred_label).numpy()
     
 def fit(epochs, lr, model, train_dl, valid_dl, max_lr, weight_decay, checkpoint_path, opt_func, class_to_idx):
     optimizer = opt_func(model.parameters(), lr, weight_decay=weight_decay)
@@ -123,7 +143,30 @@ def fit(epochs, lr, model, train_dl, valid_dl, max_lr, weight_decay, checkpoint_
     
     return result
     
+def performance(test_dl, model, num_classes, class_to_idx_dict):
+    util = Calculate()
+    labels, preds = testing(test_dl, model, util)
     
+    cm = metrics.confusion_matrix(labels, preds)
+    accuracy = metrics.accuracy_score(labels, preds)
+    precision = metrics.precision_score(labels, preds, average='macro')
+    recall = metrics.recall_score(labels, preds, average='macro')
+    F1_score = metrics.f1_score(labels, preds, average='macro')
+    
+    print('Accuracy: ', accuracy)
+    print('Precision: ', precision)
+    print('Recall: ', recall)
+    print('F1_score: ', F1_score)
+    
+    cm_plot = metrics.ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[label_to_class(class_to_idx_dict, i)[0] for i in range(num_classes)])    
+    cm_plot.plot()
+    plt.savefig('cm_map.jpg')
+
+def label_to_class(class_to_idx_dict, label):
+    classes = [k for k, v in class_to_idx_dict.items() if v == label]
+    if len(classes) != 1:
+        raise Exception('Wrong index predicted')
+    return classes
     
     
 def to_device(data, deivce):

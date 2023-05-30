@@ -3,7 +3,7 @@ import torch.nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 
 
 
@@ -38,7 +38,8 @@ def parser_opt():
     parser.add_argument('--device', type=str, default='0', help='CPU of Cuda to use')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='Weight dacay')
     parser.add_argument('--check_path', type=str, default='./best_model.pt', help='Path for best model')
-    parser.add_argument('--num_classes', type=int, default=7, help='Total classes')
+    parser.add_argument('--num_classes', type=int, default=8, help='Total classes')
+    parser.add_argument('--balance_sample', action='store_true', help='Whether balance sample data')
     opt = parser.parse_args()
     return opt
 
@@ -72,26 +73,7 @@ def load_transform(img_size=224):
         ])
     }
     
-    # augmentation_train = transforms.Compose(
-    #     [
-    #         transforms.RandomRotation(30),
-    #         # transforms.RandomResizedCrop((img_size, img_size)), 
-    #         transforms.RandomHorizontalFlip(), 
-    #         # transforms.AutoAugment(policy=transforms.autoaugment.AutoAugmentPolicy.IMAGENET), 
-    #         transforms.Resize((img_size, img_size)), 
-    #         transforms.ToTensor(), 
-    #         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    #     ]
-    # )
-    
-    
-    # augmentation_valid = transforms.Compose(
-    #     [
-    #         transforms.Resize((img_size, img_size)), 
-    #         transforms.ToTensor(), 
-    #         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    #     ]
-    # )
+
     return image_transforms
 
 
@@ -118,6 +100,32 @@ def load_model(num_classes, backbone='resnet18', pretrained=True):
     return model
 
 
+# def make_wweights_for_balanced_classes(images, nclasses):
+#     count = [0] * nclasses
+#     for item in images:
+#         count[item[1]] += 1
+#     weight_per_class = [0.] * nclasses
+#     N = float(sum(count))
+#     for i in range(nclasses):
+#         weight_per_class[i] = N / float(count[i])
+#     weight = [0] * len(images)
+#     for idx, val in enumerate(images):
+#         weight[idx] = weight_per_class[val[1]]
+#     return weight
+
+def make_wweights_for_balanced_classes(dataset, nclasses):
+    count = [0] * nclasses
+    for item in dataset:
+        count[item[1]] += 1
+    weight_per_class = [0.] * nclasses
+    N = float(sum(count))
+    for i in range(nclasses):
+        weight_per_class[i] = N / float(count[i])
+    weight = [0] * len(dataset)
+    for idx, val in enumerate(dataset):
+        weight[idx] = weight_per_class[val[1]]
+    return weight
+
 def main():
     opt = parser_opt()
     device = get_default_device(opt.device)
@@ -139,10 +147,19 @@ def main():
     # print(type(train_ds.dataset))
     # return
     
+    if opt.balance_sample:
+        weights_train, weights_valid = make_wweights_for_balanced_classes(train_ds, 8), make_wweights_for_balanced_classes(valid_ds, 8)
+        weights_train, weights_valid = torch.DoubleTensor(weights_train), torch.DoubleTensor(weights_valid)
+        sampler_train = WeightedRandomSampler(weights_train, len(weights_train))
+        sampler_valid = WeightedRandomSampler(weights_valid, len(weights_valid))
+        
+        train_dl = DataLoader(train_ds, batch_size=opt.bs, num_workers=8, sampler=sampler_train)
+        valid_dl = DataLoader(valid_ds, batch_size=opt.bs, num_workers=8, sampler=sampler_valid)
     
+    else:
+        train_dl = DataLoader(train_ds, shuffle=True, batch_size=opt.bs, num_workers=8)
+        valid_dl = DataLoader(valid_ds, batch_size=opt.bs, num_workers=8)
     
-    train_dl = DataLoader(train_ds, shuffle=True, batch_size=opt.bs, num_workers=8)
-    valid_dl = DataLoader(valid_ds, batch_size=opt.bs, num_workers=8)
     
     train_dl = DeviceDataLoader(train_dl, device)
     valid_dl = DeviceDataLoader(valid_dl, device)
@@ -157,6 +174,8 @@ def main():
     # Training
     result = fit(opt.epochs, opt.lr, model, train_dl, valid_dl, None, opt.weight_decay, opt.check_path, optim.Adam, class_to_idx)
     
+    
+    performance(valid_dl, model, opt.num_classes, class_to_idx)
     
     
 

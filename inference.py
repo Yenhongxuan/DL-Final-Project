@@ -69,7 +69,11 @@ def pred_func(img, model):
     _, pred = torch.max(output, dim=1)
     return pred
 
-
+def label_to_class(class_to_idx_dict, label):
+    classes = [k for k, v in class_to_idx_dict.items() if v == label]
+    if len(classes) != 1:
+        raise Exception('Wrong index predicted')
+    return classes
 
 
 
@@ -106,7 +110,7 @@ def run(
     # Load recognition network model
     Recog_model = load_model(8, 'resnet18', True)
     model_checkpoint = torch.load('best_model.pt')
-    print(type(model_checkpoint))
+    class_to_idx = model_checkpoint['class_to_idx']
     Recog_model.load_state_dict(model_checkpoint['model_state_dict'])
     Recog_model.eval()
     img_transform = load_transform()
@@ -214,6 +218,7 @@ def run(
                     if len(img_cropped.size()) == 3:
                         img_cropped = img_cropped[None, :]
                     label_predicted = pred_func(img_cropped, Recog_model)
+                    class_predicted = label_to_class(class_to_idx, label_predicted.clone().item())[0]
                     # print(label_predicted)
                     
                     result.append([x, y, x + w, y + h, label_predicted])
@@ -224,7 +229,7 @@ def run(
                     )
                     img_result = cv2.putText(
                         img_result, 
-                        str(round(float(conf), 2)) + '  {}'.format(label_predicted.clone().item()), 
+                        str(round(float(conf), 2)) + '  {}'.format(class_predicted), 
                         (int(x), int(y - 5)), 
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=1,

@@ -83,7 +83,7 @@ def validating(valid_dl, model, util):
         return torch.stack(batch_loss).mean(), torch.stack(batch_acc).mean()    
 
     
-def fit(epochs, lr, model, train_dl, valid_dl, max_lr, weight_decay, checkpoint_path, opt_func):
+def fit(epochs, lr, model, train_dl, valid_dl, max_lr, weight_decay, checkpoint_path, opt_func, class_to_idx):
     optimizer = opt_func(model.parameters(), lr, weight_decay=weight_decay)
     util = Calculate()
     
@@ -116,7 +116,8 @@ def fit(epochs, lr, model, train_dl, valid_dl, max_lr, weight_decay, checkpoint_
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(), 
                     'acc': best_acc,
-                    'loss': best_loss
+                    'loss': best_loss, 
+                    'class_to_idx': class_to_idx
                 }, checkpoint_path
             )
     

@@ -1,33 +1,7 @@
-# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
 """
-Run YOLOv5 detection inference on images, videos, directories, globs, YouTube, webcam, streams, etc.
-
-Usage - sources:
-    $ python detect.py --weights yolov5s.pt --source 0                               # webcam
-                                                     img.jpg                         # image
-                                                     vid.mp4                         # video
-                                                     screen                          # screenshot
-                                                     path/                           # directory
-                                                     list.txt                        # list of images
-                                                     list.streams                    # list of streams
-                                                     'path/*.jpg'                    # glob
-                                                     'https://youtu.be/Zgi9g1ksQHc'  # YouTube
-                                                     'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
-
-Usage - formats:
-    $ python detect.py --weights yolov5s.pt                 # PyTorch
-                                 yolov5s.torchscript        # TorchScript
-                                 yolov5s.onnx               # ONNX Runtime or OpenCV DNN with --dnn
-                                 yolov5s_openvino_model     # OpenVINO
-                                 yolov5s.engine             # TensorRT
-                                 yolov5s.mlmodel            # CoreML (macOS-only)
-                                 yolov5s_saved_model        # TensorFlow SavedModel
-                                 yolov5s.pb                 # TensorFlow GraphDef
-                                 yolov5s.tflite             # TensorFlow Lite
-                                 yolov5s_edgetpu.tflite     # TensorFlow Edge TPU
-                                 yolov5s_paddle_model       # PaddlePaddle
+The inference.py is based on detect.py in yolov5
+Input can be a single image or .mp4 file
 """
-
 
 
 import argparse
@@ -69,6 +43,7 @@ def pred_func(img, model):
     _, pred = torch.max(output, dim=1)
     return pred
 
+# Transform label to object class_name
 def label_to_class(class_to_idx_dict, label):
     classes = [k for k, v in class_to_idx_dict.items() if v == label]
     if len(classes) != 1:
@@ -97,7 +72,7 @@ def run(
         augment=False,  # augmented inference
         visualize=False,  # visualize features
         update=False,  # update all models
-        project=ROOT / 'runs/detect',  # save results to project/name
+        project=ROOT / 'runs',  # save results to project/name
         name='exp',  # save results to project/name
         exist_ok=False,  # existing project/name ok, do not increment
         line_thickness=3,  # bounding box thickness (pixels)
@@ -106,10 +81,14 @@ def run(
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
+        num_classes=6, 
+        best_model = 'best_model_1.pt'
 ):
-    # Load recognition network model
-    Recog_model = load_model(8, 'resnet18', True)
-    model_checkpoint = torch.load('best_model.pt')
+    """
+    Load grocery recognition model and corresponding transformation
+    """
+    Recog_model = load_model(num_classes, 'resnet18', True)
+    model_checkpoint = torch.load(best_model)
     class_to_idx = model_checkpoint['class_to_idx']
     Recog_model.load_state_dict(model_checkpoint['model_state_dict'])
     Recog_model.eval()
@@ -188,12 +167,12 @@ def run(
             s += '%gx%g ' % im.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
-            annotator = Annotator(im0, line_width=line_thickness, example=str(names))
+           
             
             
             
             img_result = im0s.copy()
-            result = []
+            label_counter = [0] * num_classes # Counter of each class of grocery
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
@@ -206,32 +185,31 @@ def run(
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
-                i = 0
                 for *xyxy, conf, cls in reversed(det):
+                    
                     
                     
                     x1, y1, x2, y2 = xyxy[0].to(torch.int), xyxy[1].to(torch.int), xyxy[2].to(torch.int), xyxy[3].to(torch.int)
                     x, y, w, h = x1, y1, x2 - x1, y2 - y1
                     img_cropped = im0s[y:y+h, x:x+w].copy()
-                    
-                    cv2.imwrite(os.path.join('./detection', '{}.jpg'.format(i)), img_cropped)
-                    i += 1
-                    
-                    
-                    
+                    img_cropped = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB) # Change color from bgr(cv2) to rgb(PIL)
                     img_cropped = Image.fromarray(img_cropped)
-                    img_cropped = img_transform['test'](img_cropped)
-                    if len(img_cropped.size()) == 3:
+                   
+                    
+                
+                    
+                    img_cropped = img_transform['test'](img_cropped) # Apply transformation
+                    if len(img_cropped.size()) == 3: # Append dimension to predict
                         img_cropped = img_cropped[None, :]
                     label_predicted = pred_func(img_cropped, Recog_model)
+                    label_counter[label_predicted] += 1
                     class_predicted = label_to_class(class_to_idx, label_predicted.clone().item())[0]
-                    # print(label_predicted)
-                    
-                    result.append([x, y, x + w, y + h, label_predicted])
+           
                     
                     
+                    # Draw bounding box and class_name on image
                     img_result = cv2.rectangle(
-                        img_result, (int(x), int(y)), (int(x + w), int(y + h)), (0, 0, 255), 2
+                        img_result, (int(x), int(y)), (int(x + w), int(y + h)), (0, 0, 255), 3
                     )
                     img_result = cv2.putText(
                         img_result, 
@@ -239,35 +217,28 @@ def run(
                         (int(x), int(y - 5)), 
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=1,
-                        color=(255, 0, 0),
+                        color=(0, 255, 0),
                         thickness=2,
                     )
                     
                     
-                    
+                # print(label_counter)
                    
-                    
-                    
-                    
-                    # if save_txt:  # Write to file
-                    #     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    #     line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                    #     with open(f'{txt_path}.txt', 'a') as f:
-                    #         f.write(('%g ' * len(line)).rstrip() % line + '\n')
-
-                    # if save_img or save_crop or view_img:  # Add bbox to image
-                    #     c = int(cls)  # integer class
-                    #     label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                    #     annotator.box_label(xyxy, label, color=colors(c, True))
-                    # if save_crop:
-                    #     save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
-                
-                
-            
-
             # Stream results
-            # im0 = annotator.result()
             im0 = img_result.copy()
+            statistic = ['{}: {}'.format(label_to_class(class_to_idx, i), label_counter[i]) for i in range(len(label_counter))]
+            
+            
+            # Put statistic of each class on up-left corner of image
+            im0 = cv2.putText(
+                        im0, 
+                        '; '.join(statistic), 
+                        (30, 30), 
+                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=1,
+                        color=(0, 255, 0),
+                        thickness=2,
+                    )
             if view_img:
                 if platform.system() == 'Linux' and p not in windows:
                     windows.append(p)
@@ -281,6 +252,7 @@ def run(
                 if dataset.mode == 'image':
                     cv2.imwrite(save_path, im0)
                 else:  # 'video' or 'stream'
+                    print(i)
                     if vid_path[i] != save_path:  # new video
                         vid_path[i] = save_path
                         if isinstance(vid_writer[i], cv2.VideoWriter):
@@ -310,7 +282,7 @@ def run(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path or triton URL')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolo_weights/yolo_best.pt', help='model path or triton URL')
     parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob/screen/0(webcam)')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
@@ -337,6 +309,11 @@ def parse_opt():
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
+    
+    # Option for grocery recognition network 
+    parser.add_argument('--num_classes', type=int, default=6, help='Number of classes')
+    parser.add_argument('--best_model', type=str, default='best_model_1.pt', help='Model for DNN')
+    
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))

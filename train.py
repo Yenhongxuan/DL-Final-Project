@@ -37,8 +37,8 @@ def parser_opt():
     parser.add_argument('--bs', type=int, default=16, help='Batch size')
     parser.add_argument('--device', type=str, default='0', help='CPU of Cuda to use')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='Weight dacay')
-    parser.add_argument('--check_path', type=str, default='./best_model.pt', help='Path for best model')
-    parser.add_argument('--num_classes', type=int, default=8, help='Total classes')
+    parser.add_argument('--check_path', type=str, default='./best_model.pt', help='Path for save checkpoint of best model')
+    parser.add_argument('--num_classes', type=int, default=6, help='Total classes')
     parser.add_argument('--balance_sample', action='store_true', help='Whether balance sample data')
     opt = parser.parse_args()
     return opt
@@ -78,6 +78,7 @@ def load_transform(img_size=224):
 
 
 def load_model(num_classes, backbone='resnet18', pretrained=True):
+    
     if backbone == 'resnet18':
         if pretrained:
             model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)    
@@ -88,6 +89,7 @@ def load_model(num_classes, backbone='resnet18', pretrained=True):
     for param in model.parameters():
         param.requires_grad = False
         
+    # Modify fc-layer
     fc_inputs = model.fc.in_features
     model.fc = torch.nn.Sequential(
         torch.nn.Linear(fc_inputs, 256),
@@ -99,20 +101,7 @@ def load_model(num_classes, backbone='resnet18', pretrained=True):
         
     return model
 
-
-# def make_wweights_for_balanced_classes(images, nclasses):
-#     count = [0] * nclasses
-#     for item in images:
-#         count[item[1]] += 1
-#     weight_per_class = [0.] * nclasses
-#     N = float(sum(count))
-#     for i in range(nclasses):
-#         weight_per_class[i] = N / float(count[i])
-#     weight = [0] * len(images)
-#     for idx, val in enumerate(images):
-#         weight[idx] = weight_per_class[val[1]]
-#     return weight
-
+# Calculate sample weight of each classes
 def make_wweights_for_balanced_classes(dataset, nclasses):
     count = [0] * nclasses
     for item in dataset:
@@ -133,7 +122,7 @@ def main():
     
     # Load dataset
     dataset = torchvision.datasets.ImageFolder(opt.root, transform=None, target_transform=None)
-    class_to_idx = dataset.class_to_idx
+    class_to_idx = dataset.class_to_idx # Dictoinary containind relationship between label and class_name
     
     train_ds, valid_ds = torch.utils.data.random_split(dataset, [0.8, 0.2])
     
@@ -144,11 +133,10 @@ def main():
     train_ds = myDataset(train_ds, image_transform['train'])
     valid_ds = myDataset(valid_ds, image_transform['valid'])
     
-    # print(type(train_ds.dataset))
-    # return
-    
+ 
+    # Apply weighted sampling
     if opt.balance_sample:
-        weights_train, weights_valid = make_wweights_for_balanced_classes(train_ds, 8), make_wweights_for_balanced_classes(valid_ds, 8)
+        weights_train, weights_valid = make_wweights_for_balanced_classes(train_ds, opt.num_classes), make_wweights_for_balanced_classes(valid_ds, opt.num_classes)
         weights_train, weights_valid = torch.DoubleTensor(weights_train), torch.DoubleTensor(weights_valid)
         sampler_train = WeightedRandomSampler(weights_train, len(weights_train))
         sampler_valid = WeightedRandomSampler(weights_valid, len(weights_valid))
@@ -174,19 +162,10 @@ def main():
     # Training
     result = fit(opt.epochs, opt.lr, model, train_dl, valid_dl, None, opt.weight_decay, opt.check_path, optim.Adam, class_to_idx)
     
-    
+    # Test on validation set
     performance(valid_dl, model, opt.num_classes, class_to_idx)
     
     
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
